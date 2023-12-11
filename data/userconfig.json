@@ -1,0 +1,1 @@
+{"MQTTClientID":"weatherStation","MQTTUser":"mqttUser","MQTTPass":"MQTTPassword","MQTTTopic":"weatherStation","MQTTCommandTopic":"weatherStation/command","MQTTHost":"192.168.1.1","MQTTPort":"1883","MQTTInterval":"60","SyslogServer":"192.168.1.1","SyslogPort":"514","domoticzRainIdx":"","domoticzWindIdx":"","domoticzTempIdx":""}

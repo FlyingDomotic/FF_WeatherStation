@@ -1,0 +1,33 @@
+{
+    "groups": [
+        {
+            "title": "Weather server parameters",
+            "entities": [
+                {
+                    "name": "domoticzRainIdx",
+                    "title": "Domoticz rain sensor IDX",
+                    "attributes": {
+                        "size": 5,
+                        "pattern": "^[0-9]*$"
+                    }
+                },
+                {
+                    "name": "domoticzWindIdx",
+                    "title": "Domoticz wind sensor IDX",
+                    "attributes": {
+                        "size": 5,
+                        "pattern": "^[0-9]*$"
+                    }
+                },
+                {
+                    "name": "domoticzTempIdx",
+                    "title": "Domoticz temperature sensor IDX",
+                    "attributes": {
+                        "size": 5,
+                        "pattern": "^[0-9]*$"
+                    }
+                }
+            ]
+        }
+    ]
+}
