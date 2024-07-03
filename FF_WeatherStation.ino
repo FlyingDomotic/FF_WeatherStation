@@ -6,21 +6,21 @@
 		3	MOSI	D7
 		4	SCK		D5
 		5	MISO	D6
-		6	GDO2	D2
-		7	GDO0	D1
 		8	CSN		D8
 
 */
 
-#define VERSION "1.0.3"										// Version of this code
+#define VERSION "1.0.5"										// Version of this code
 #include <FF_WebServer.h>									// Defines associated to FF_WebServer class
 #include <TimeLib.h>										// Date/time definition
 #include "ELECHOUSE_CC1101_SRC_DRV.h"						// Modified version of https://github.com/LSatan/SmartRC-CC1101-Driver-Lib
 //#define PRINT_RECEIVED_FRAME
 //#define PRINT_REJECT_REASON
 //#define PRINT_EXTRACTED_MESSAGE
+#define PRINT_EXTRACTED_BAD_MESSAGE
 //#define PRINT_MESSAGE_DETAILS
 #define PRINT_DECODED_MESSAGE
+#define CHECK_PATTERN_INSTEAD_OF_CRC
 
 //	User internal data
 //		Declare here user's data needed by user's code
@@ -29,6 +29,7 @@ unsigned long badCrc = 0;					// Count of bad CRC
 unsigned long goodCrc = 0;					// Count of good CRC
 unsigned long lightLux = 0;					// Light level in lux
 unsigned long lastRainSaved = 0;			// Time last rain was saved
+unsigned long lastRadioScan = 0;			// Time last radio scan occured
 float tempF = 0;							// Temperature in Fahrenheit
 float tempC = 0;							// Temperature in degrees
 float windKmh = 0;							// Wind in km/h
@@ -46,7 +47,7 @@ int lux14 = 0;								// Raw lux offset 14
 int lux15 = 0;								// Raw lux offset 15
 int luxMulti = 0;							// Lux by 10 multiplier flag
 int rssi = 0;								// RX RSSI
-uint8_t radioMsg[32];                      	// Extracted radio buffer
+uint8_t radioMsg[32];						// Extracted radio buffer
 char hexMsg[65];							// Hex message buffer
 byte radioBuffer[257];						// Read radio buffer
 char *windAbbreviation[] = {(char*)("N"), (char*)("NE"), (char*)("E"), (char*)("SE"), (char*)("S"), (char*)("SW"), (char*)("W"), (char*)("NW")};
@@ -85,60 +86,64 @@ char *getWindAbbreviation(int windDir) {
 }
 
 #ifdef PRINT_MESSAGE_DETAILS
-  // Extract up to 7 four bits sequences from message
-  uint16_t extractBytes(uint8_t const msg[], uint16_t const pos, uint16_t const halfByteCount){
-    uint16_t result = 0;
-    uint8_t content;
-    uint16_t startPos = pos;
-    // For the given (<=8) count of 4 bits
-    for (uint16_t i = 0; i < halfByteCount; i++) {
-      // Extract content from message
-      content = msg[startPos >> 1];
-      // Shift content if even position
-      if (!(startPos & 1)) {
-        content = content >> 4;
-      }
-      // Add the four bits to result
-      result = (result << 4) | (content & 0x0f);
-      startPos++;
-    }
-    return result;
-  }
+	// Extract up to 7 four bits sequences from message
+	uint16_t extractBytes(uint8_t const msg[], uint16_t const pos, uint16_t const halfByteCount){
+		uint16_t result = 0;
+		uint8_t content;
+		uint16_t startPos = pos;
+		// For the given (<=8) count of 4 bits
+		for (uint16_t i = 0; i < halfByteCount; i++) {
+			// Extract content from message
+			content = msg[startPos >> 1];
+			// Shift content if even position
+			if (!(startPos & 1)) {
+				content = content >> 4;
+			}
+			// Add the four bits to result
+			result = (result << 4) | (content & 0x0f);
+			startPos++;
+		}
+		return result;
+	}
 #endif
 
 // Add bytes value from message on a given number of bytes (used to compute CRC)
 int addBytes(uint8_t const message[], uint16_t const num_bytes) {
-  int result = 0;
-  for (uint16_t i = 0; i < num_bytes; ++i) {
-      result += message[i];
-  }
-  return result;
+	int result = 0;
+	for (uint16_t i = 0; i < num_bytes; ++i) {
+			result += message[i];
+	}
+	return result;
 }
 
 // Decode one 32 bytes message
 void decodeMessage(uint8_t const msg[], const uint16_t len) {
-	#ifdef PRINT_EXTRACTED_MESSAGE
-		Serial.print("->");
-		for (uint16_t i = 0; i < len; i++) {
-			Serial.printf("%02x", msg[i]);
-		}
-		Serial.print(" - ");
-	#endif
 	uint8_t msgCrc = addBytes(msg, 31) & 0xff;
-	// Check CRC and constant byte before last one
-	if (msgCrc == msg[31] && msg[29] == 0x17) {
+	// Check CRC
+	#ifdef CHECK_PATTERN_INSTEAD_OF_CRC
+	if (msg[16] == 0x04 && msg[17] == 0x05 && msg[18] == 0x06) {
+	#else
+	if (msgCrc == msg[31]) {
+	#endif
 		goodCrc++;
 		#ifdef PRINT_EXTRACTED_MESSAGE
-			Serial.print("CRC Ok!\n");
+			Serial.print("Frame: ");
+			for (uint16_t i = 0; i < len; i++) {
+				Serial.printf("%02x", msg[i]);
+			}
+			Serial.print(" - CRC Ok!\n");
 		#endif
 	} else {
 		badCrc++;
-		#ifdef PRINT_EXTRACTED_MESSAGE
-			Serial.printf("!!! BAD CRC !!! computed %02x, received %02x\n", msgCrc, msg[31]);
+		#if defined(PRINT_EXTRACTED_MESSAGE) || defined(PRINT_EXTRACTED_BAD_MESSAGE)
+			Serial.print("Frame: ");
+			for (uint16_t i = 0; i < len; i++) {
+				Serial.printf("%02x", msg[i]);
+			}
+			Serial.printf(" - !!! BAD CRC !!! computed %02x, received %02x\n", msgCrc, msg[31]);
 		#endif
 		return;
 	}
-
 	#ifdef PRINT_MESSAGE_DETAILS
 		for (uint16_t i = 0; i < (len + len); i++) {
 			Serial.printf("%d: %2x %d %d %d %d\n", i, extractBytes(msg, i, 1), extractBytes(msg, i, 1), extractBytes(msg, i, 2), extractBytes(msg, i, 3), extractBytes(msg, i, 4));
@@ -147,7 +152,7 @@ void decodeMessage(uint8_t const msg[], const uint16_t len) {
 	/*
 	Frame with UV Lux without Wind Gust
 	AA 04 II IB 0T TT HH 0W WW 0D DD RR RR UU LL LL 04 05 06 07 08 09 10 11 12 13 14 15 16 17 xx SS yy
-    00 01 02 03 04 05 06 07 08 09 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32
+	00 01 02 03 04 05 06 07 08 09 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32
 	00 00 00 00 00 11 11 11 11 11 22 22 22 22 22 33 33 33 33 33 44 44 44 44 44 55 55 55 55 55 66 66 66 
 	01 23 45 67 89 01 23 45 67 89 01 23 45 67 89 01 23 45 67 89 01 23 45 67 89 01 23 45 67 89 01 23 45
 		- K: (4 bit) Kind of device, = A if Temp/Hum Sensor or = 0 if Weather Rain/Wind station
@@ -253,7 +258,7 @@ CONFIG_CHANGED_CALLBACK(onConfigChangedCallback) {
 */
 
 HELP_MESSAGE_CALLBACK(onHelpMessageCallback) {
-	return PSTR("");
+	return "";
 }
 
 /*!
@@ -516,10 +521,12 @@ MQTT_MESSAGE_CALLBACK(onMqttMessageCallback) {
 void setup() {
 	// Open serial connection
 	Serial.begin(74880);
+	Serial.printf("\nStarting...\n");
 	// Start Little File System
 	LittleFS.begin();
 	// Start FF_WebServer
 	FF_WebServer.begin(&LittleFS, VERSION);
+	Serial.setDebugOutput(false);
 	// Register user's trace callback, if needed
 	#ifdef FF_DISABLE_DEFAULT_TRACE
 		trace_register(myTraceCallback);
@@ -538,82 +545,89 @@ void setup() {
 	FF_WebServer.setMqttConnectCallback(&onMqttConnectCallback);
 	FF_WebServer.setMqttMessageCallback(&onMqttMessageCallback);
 
-	if (ELECHOUSE_cc1101.getCC1101()){                      // Check the CC1101 Spi connection.
-		trace_info_P("Connection OK", 0);
+	if (ELECHOUSE_cc1101.getCC1101()){		// Check the CC1101 Spi connection.
+		trace_info_P("CC1101 connection OK", 0);
 	} else {
 		trace_error_P("CC1101 connection Error", 0);
 		while(1);
 	}
-	ELECHOUSE_cc1101.setSres();             // Set reset
-	ELECHOUSE_cc1101.Init();                // Must be set to initialize the cc1101!
+	ELECHOUSE_cc1101.setSres();				// Set reset
+	ELECHOUSE_cc1101.Init();				// Must be set to initialize the cc1101!
 
-	ELECHOUSE_cc1101.setCCMode(1);          // Set config for internal transmission mode.
-	ELECHOUSE_cc1101.setChannel(0);         // Set the Channelnumber from 0 to 255. Default is channel 0.
-	ELECHOUSE_cc1101.setChsp(199.95);       // The channel spacing is multiplied by the channel number CHAN and added to the base frequency in kHz. Value from 25.39 to 405.45. Default is 199.95 kHz.
-	ELECHOUSE_cc1101.setPA(10);             // Set TxPower. The following settings are possible depending on the frequency band.  (-30  -20  -15  -10  -6    0    5    7    10   11   12) Default is max!
-	ELECHOUSE_cc1101.setAdrChk(0);          // Controls address check configuration of received packages. 0 = No address check. 1 = Address check, no broadcast. 2 = Address check and 0 (0x00) broadcast. 3 = Address check and 0 (0x00) and 255 (0xFF) broadcast.
-	ELECHOUSE_cc1101.setAddr(0);            // Address used for packet filtration. Optional broadcast addresses are 0 (0x00) and 255 (0xFF).
-	ELECHOUSE_cc1101.setWhiteData(0);       // Turn data whitening on / off. 0 = Whitening off. 1 = Whitening on.
-	ELECHOUSE_cc1101.setCRC_AF(0);          // Enable automatic flush of RX FIFO when CRC is not OK. This requires that only one packet is in the RXIFIFO and that packet length is limited to the RX FIFO size.
-	ELECHOUSE_cc1101.setDcFilterOff(0);     // Disable digital DC blocking filter before demodulator. Only for data rates ≤ 250 kBaud The recommended IF frequency changes when the DC blocking is disabled. 1 = Disable (current optimized). 0 = Enable (better sensitivity).
-	ELECHOUSE_cc1101.setManchester(0);      // Enables Manchester encoding/decoding. 0 = Disable. 1 = Enable.
-	ELECHOUSE_cc1101.setFEC(0);             // Enable Forward Error Correction (FEC) with interleaving for packet payload (Only supported for fixed packet length mode. 0 = Disable. 1 = Enable.
-	ELECHOUSE_cc1101.setPRE(0);             // Sets the minimum number of preamble bytes to be transmitted. Values: 0 : 2, 1 : 3, 2 : 4, 3 : 6, 4 : 8, 5 : 12, 6 : 16, 7 : 24
-	ELECHOUSE_cc1101.setPQT(0);             // Preamble quality estimator threshold. The preamble quality estimator increases an internal counter by one each time a bit is received that is different from the previous bit, and decreases the counter by 8 each time a bit is received that is the same as the last bit. A threshold of 4∙PQT for this counter is used to gate sync word detection. When PQT=0 a sync word is always accepted.
-	ELECHOUSE_cc1101.setAppendStatus(0);    // When enabled, two status bytes will be appended to the payload of the packet. The status bytes contain RSSI and LQI values, as well as CRC OK.
+	ELECHOUSE_cc1101.setCCMode(1);			// Set config for internal transmission mode.
+	ELECHOUSE_cc1101.setChannel(0);			// Set the Channelnumber from 0 to 255. Default is channel 0.
+	ELECHOUSE_cc1101.setChsp(199.95);		// The channel spacing is multiplied by the channel number CHAN and added to the base frequency in kHz. Value from 25.39 to 405.45. Default is 199.95 kHz.
+	ELECHOUSE_cc1101.setPA(10);				// Set TxPower. The following settings are possible depending on the frequency band.  (-30  -20  -15  -10  -6    0    5    7    10   11   12) Default is max!
+	ELECHOUSE_cc1101.setAdrChk(0);			// Controls address check configuration of received packages. 0 = No address check. 1 = Address check, no broadcast. 2 = Address check and 0 (0x00) broadcast. 3 = Address check and 0 (0x00) and 255 (0xFF) broadcast.
+	ELECHOUSE_cc1101.setAddr(0);			// Address used for packet filtration. Optional broadcast addresses are 0 (0x00) and 255 (0xFF).
+	ELECHOUSE_cc1101.setWhiteData(0);		// Turn data whitening on / off. 0 = Whitening off. 1 = Whitening on.
+	ELECHOUSE_cc1101.setCRC_AF(0);			// Enable automatic flush of RX FIFO when CRC is not OK. This requires that only one packet is in the RXIFIFO and that packet length is limited to the RX FIFO size.
+	ELECHOUSE_cc1101.setDcFilterOff(0);		// Disable digital DC blocking filter before demodulator. Only for data rates ≤ 250 kBaud The recommended IF frequency changes when the DC blocking is disabled. 1 = Disable (current optimized). 0 = Enable (better sensitivity).
+	ELECHOUSE_cc1101.setManchester(0);		// Enables Manchester encoding/decoding. 0 = Disable. 1 = Enable.
+	ELECHOUSE_cc1101.setFEC(0);				// Enable Forward Error Correction (FEC) with interleaving for packet payload (Only supported for fixed packet length mode. 0 = Disable. 1 = Enable.
+	ELECHOUSE_cc1101.setPRE(0);				// Sets the minimum number of preamble bytes to be transmitted. Values: 0 : 2, 1 : 3, 2 : 4, 3 : 6, 4 : 8, 5 : 12, 6 : 16, 7 : 24
+	ELECHOUSE_cc1101.setPQT(0);				// Preamble quality estimator threshold. The preamble quality estimator increases an internal counter by one each time a bit is received that is different from the previous bit, and decreases the counter by 8 each time a bit is received that is the same as the last bit. A threshold of 4∙PQT for this counter is used to gate sync word detection. When PQT=0 a sync word is always accepted.
+	ELECHOUSE_cc1101.setAppendStatus(0);	// When enabled, two status bytes will be appended to the payload of the packet. The status bytes contain RSSI and LQI values, as well as CRC OK.
 
-	ELECHOUSE_cc1101.setSidle();            // Set idle
-	ELECHOUSE_cc1101.setMHZ(433.89);        // Base frequency
-	ELECHOUSE_cc1101.setModulation(0);      // Set modulation mode.
-	ELECHOUSE_cc1101.setDRate(11.11);       // Set the Data Rate in kBaud
-	ELECHOUSE_cc1101.setSyncMode(2);        // Combined sync-word qualifier mode (2 = 16/16 sync word bits detected)
-	ELECHOUSE_cc1101.setSyncWord(0xCA, 0x54); // Set sync word
-	ELECHOUSE_cc1101.setPktFormat(0);       // Format of RX and TX data (0 = Normal mode, use FIFOs for RX and TX)
-	ELECHOUSE_cc1101.setLengthConfig(1);    // 0 = Fixed packet length mode
-	ELECHOUSE_cc1101.setPacketLength(0);    // Indicates the packet length
-	ELECHOUSE_cc1101.setCrc(0);             // 0 = CRC disabled for TX and RX.
-	ELECHOUSE_cc1101.setRxBW(160);          // Set the Receive Bandwidth in kHz
-	ELECHOUSE_cc1101.setDeviation(35);      // Set frequency deviation
-	uint8_t foccfg = ELECHOUSE_cc1101.SpiReadReg(CC1101_FOCCFG); // Read current FOCCFG
-	ELECHOUSE_cc1101.SpiWriteReg(CC1101_FOCCFG, foccfg | (1 << 5)); // Force bit 5 (FOC_BS_CS_GATE)
-	ELECHOUSE_cc1101.SpiWriteReg(CC1101_BSCFG, 0x6C); // Bit Synchronization Configuration
+	ELECHOUSE_cc1101.setSidle();			// Set idle
+	ELECHOUSE_cc1101.setMHZ(433.89);		// Base frequency
+	ELECHOUSE_cc1101.setModulation(0);		// Set modulation mode.
+	ELECHOUSE_cc1101.setDRate(11.11);		// Set the Data Rate in kBaud
+	ELECHOUSE_cc1101.setSyncMode(2);		// Combined sync-word qualifier mode (2 = 16/16 sync word bits detected)
+	ELECHOUSE_cc1101.setSyncWord(0xCA, 0x54);	// Set sync word
+	ELECHOUSE_cc1101.setPktFormat(0);		// Format of RX and TX data (0 = Normal mode, use FIFOs for RX and TX)
+	ELECHOUSE_cc1101.setLengthConfig(1);	// 0 = Fixed packet length mode
+	ELECHOUSE_cc1101.setPacketLength(0);	// Indicates the packet length
+	ELECHOUSE_cc1101.setCrc(0);				// 0 = CRC disabled for TX and RX.
+	ELECHOUSE_cc1101.setRxBW(160);			// Set the Receive Bandwidth in kHz
+	ELECHOUSE_cc1101.setDeviation(35);	// Set frequency deviation
+	uint8_t foccfg = ELECHOUSE_cc1101.SpiReadReg(CC1101_FOCCFG);	// Read current FOCCFG
+	ELECHOUSE_cc1101.SpiWriteReg(CC1101_FOCCFG, foccfg | (1 << 5));	// Force bit 5 (FOC_BS_CS_GATE)
+	ELECHOUSE_cc1101.SpiWriteReg(CC1101_BSCFG, 0x6C);	// Bit Synchronization Configuration
 	ELECHOUSE_cc1101.SpiWriteReg(CC1101_AGCCTRL0, 0x91);
 	ELECHOUSE_cc1101.SpiWriteReg(CC1101_AGCCTRL1, 0x40);
 	ELECHOUSE_cc1101.SpiWriteReg(CC1101_AGCCTRL2, 0x43);
+
+    windAbbr = getWindAbbreviation(0);		// To avoid crash before first message received
 }
 
 //	This is the main loop.
 //	Do what ever you want and call FF_WebServer.handle()
 void loop() {
 	// User part of loop
-	//Checks whether something has been received.
-	  if (ELECHOUSE_cc1101.CheckRxFifo(100)){
-		memset(radioBuffer, 0, sizeof(radioBuffer));
-		//Get received Data and calculate length
-		int len = ELECHOUSE_cc1101.ReceiveData(radioBuffer);
-		// Get RSSI
-		rssi = ELECHOUSE_cc1101.getRssi();
-		// Reject noisy frames
-		if ((rssi >= -90) && len) {
-			#ifdef PRINT_RECEIVED_FRAME
-				Serial.printf("Rssi: %d, len: %d, radioBuffer:", rssi, len);
-				for (int i = 0; i < len; i++) {
-					Serial.printf(" %02x", radioBuffer[i]);
-				}
-				Serial.print("\n");
-			#endif
-			// Check preamble
-			if (radioBuffer[0] == 0xaa) {
-			// Copy message after pattern
-			memcpy(radioMsg, &radioBuffer[0], sizeof(radioMsg)); 
-			decodeMessage(radioMsg, sizeof(radioMsg));
-			#ifdef PRINT_REJECT_REASON
-			} else {
-				Serial.printf("Frame too noisy or too short\n");
-			#endif
-			}
-		}
-    }
+
+	//Checks whether something has been received every 10 ms
+    unsigned long now = millis();
+    if ((now - lastRadioScan) > 5) {
+        lastRadioScan = now;
+        if (ELECHOUSE_cc1101.CheckRxFifo(100)){
+            memset(radioBuffer, 0, sizeof(radioBuffer));
+            //Get received Data and calculate length
+            int len = ELECHOUSE_cc1101.ReceiveData(radioBuffer);
+            // Get RSSI
+            rssi = ELECHOUSE_cc1101.getRssi();
+            // Reject noisy frames
+            if ((rssi >= -90) && len) {
+                #ifdef PRINT_RECEIVED_FRAME
+                    Serial.printf("Rssi: %d, len: %d, radioBuffer:", rssi, len);
+                    for (int i = 0; i < len; i++) {
+                        Serial.printf(" %02x", radioBuffer[i]);
+                    }
+                    Serial.print("\n");
+                #endif
+                // Check preamble
+                if (radioBuffer[0] == 0xaa) {
+                // Copy message after pattern
+                memcpy(radioMsg, &radioBuffer[0], sizeof(radioMsg)); 
+                decodeMessage(radioMsg, sizeof(radioMsg));
+                #ifdef PRINT_REJECT_REASON
+                } else {
+                    Serial.printf("Frame too noisy or too short\n");
+                #endif
+                }
+            }
+        }
+	}
 
 	// Manage Web Server
 	FF_WebServer.handle();
