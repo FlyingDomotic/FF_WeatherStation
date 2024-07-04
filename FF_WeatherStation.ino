@@ -10,7 +10,7 @@
 
 */
 
-#define VERSION "1.0.5"										// Version of this code
+#define VERSION "1.0.7"										// Version of this code
 #include <FF_WebServer.h>									// Defines associated to FF_WebServer class
 #include <TimeLib.h>										// Date/time definition
 #include "ELECHOUSE_CC1101_SRC_DRV.h"						// Modified version of https://github.com/LSatan/SmartRC-CC1101-Driver-Lib
@@ -600,7 +600,7 @@ void loop() {
     unsigned long now = millis();
     if ((now - lastRadioScan) > 5) {
         lastRadioScan = now;
-        if (ELECHOUSE_cc1101.CheckRxFifo(100)){
+        if (ELECHOUSE_cc1101.CheckRxFifo(20)){              // It tooks approx 16 ms to read 250 chars of 10 bits @ 160 kHz
             memset(radioBuffer, 0, sizeof(radioBuffer));
             //Get received Data and calculate length
             int len = ELECHOUSE_cc1101.ReceiveData(radioBuffer);
