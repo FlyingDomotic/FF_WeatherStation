@@ -10,7 +10,7 @@
 
 */
 
-#define VERSION "1.0.8"										// Version of this code
+#define VERSION "1.0.17"									// Version of this code
 #include <FF_WebServer.h>									// Defines associated to FF_WebServer class
 #include <TimeLib.h>										// Date/time definition
 #include "ELECHOUSE_CC1101_SRC_DRV.h"						// Modified version of https://github.com/LSatan/SmartRC-CC1101-Driver-Lib
@@ -206,9 +206,11 @@ void decodeMessage(uint8_t const msg[], const uint16_t len) {
 	loadHexMsg(radioMsg, sizeof(radioMsg));
 	char tempBuffer[280];
 	snprintf_P(tempBuffer, sizeof(tempBuffer)-1, 
-		PSTR("{\"date\":\"%04d/%02d/%02d %02d:%02d:%02d\",\"temperature\":%.01f,\"humidity\":%d,\"windSpeed\":%.1f,\"windDirection\":%d,\"direction\":\"%s\",\"rain\":%.01f,\"rainMn\":%.02f,\"uv\":%d,\"lux\":%lu,\"frame\":\"%s\",\"rssi\":%d}"),
+		PSTR("{\"date\":\"%04d/%02d/%02d %02d:%02d:%02d\",\"temperature\":%.01f,\"humidity\":%d,\"windSpeed\":%.1f,\"windDirection\":%d,\"direction\":\"%s\",\"rain\":%.01f,\"rainMn\":%.02f,\"uv\":%d,\"lux\":%lu,\"frame\":\"%s\",\"rssi\":%d,\"goodCrc\":%lu,\"badCrc\":%lu}"),
 		year(), month(), day(), hour(), minute(), second(),
-		tempC, humidity, windKmh, windDir, windAbbr, rainMm, rainMn, uvIndex, lightLux, hexMsg, rssi);
+		tempC, humidity,
+        windKmh, windDir, windAbbr, rainMm, rainMn,
+        uvIndex, lightLux, hexMsg, rssi, goodCrc, badCrc);
 	FF_WebServer.mqttPublish("data", tempBuffer, true);
 	// Update Domoticz wind
 	if (domoticzWindIdx !="") {
@@ -334,11 +336,16 @@ DEBUG_COMMAND_CALLBACK(onDebugCommandCallback) {
 REST_COMMAND_CALLBACK(onRestCommandCallback) {
 	if (request->url() == "/rest/values") {
 		char tempBuffer[500];
+		int updHours = 99;
+		int updMin = 99;
+		int updSec = 99;
+        if (lastRainSaved) {
 		unsigned long updateDelta = (millis() - lastRainSaved) / 1000;
-		int updHours = updateDelta / 3600;
+            updHours = updateDelta / 3600;
 		int secsRemaining = updateDelta % 3600;
-		int updMin = secsRemaining / 60;
-		int updSec = secsRemaining % 60;
+            updMin = secsRemaining / 60;
+            updSec = secsRemaining % 60;
+        }
 
 		tempBuffer[0] = 0;
 		float pctGoodCrc = 0;
@@ -572,15 +579,16 @@ void setup() {
 	ELECHOUSE_cc1101.setSidle();			// Set idle
 	ELECHOUSE_cc1101.setMHZ(433.89);		// Base frequency
 	ELECHOUSE_cc1101.setModulation(0);		// Set modulation mode.
-	ELECHOUSE_cc1101.setDRate(11.11);		// Set the Data Rate in kBaud
+	ELECHOUSE_cc1101.setDRate(11.22); 		// Set the Data Rate in kBaud
 	ELECHOUSE_cc1101.setSyncMode(2);		// Combined sync-word qualifier mode (2 = 16/16 sync word bits detected)
 	ELECHOUSE_cc1101.setSyncWord(0xCA, 0x54);	// Set sync word
 	ELECHOUSE_cc1101.setPktFormat(0);		// Format of RX and TX data (0 = Normal mode, use FIFOs for RX and TX)
-	ELECHOUSE_cc1101.setLengthConfig(1);	// 0 = Fixed packet length mode
+	ELECHOUSE_cc1101.setLengthConfig(1);	// 1 = Variable packet length mode
 	ELECHOUSE_cc1101.setPacketLength(0);	// Indicates the packet length
 	ELECHOUSE_cc1101.setCrc(0);				// 0 = CRC disabled for TX and RX.
 	ELECHOUSE_cc1101.setRxBW(160);			// Set the Receive Bandwidth in kHz
 	ELECHOUSE_cc1101.setDeviation(35);	// Set frequency deviation
+    
 	uint8_t foccfg = ELECHOUSE_cc1101.SpiReadReg(CC1101_FOCCFG);	// Read current FOCCFG
 	ELECHOUSE_cc1101.SpiWriteReg(CC1101_FOCCFG, foccfg | (1 << 5));	// Force bit 5 (FOC_BS_CS_GATE)
 	ELECHOUSE_cc1101.SpiWriteReg(CC1101_BSCFG, 0x6C);	// Bit Synchronization Configuration
@@ -596,11 +604,11 @@ void setup() {
 void loop() {
 	// User part of loop
 
-	//Checks whether something has been received every 10 ms
+	//Checks whether something has been received every ms
     unsigned long now = millis();
-    if ((now - lastRadioScan) > 5) {
+    if ((now - lastRadioScan) >= 1) {
         lastRadioScan = now;
-        if (ELECHOUSE_cc1101.CheckRxFifo(20)){              // It tooks approx 16 ms to read 250 chars of 10 bits @ 160 kHz
+        if (ELECHOUSE_cc1101.CheckRxFifo(24)){              // It tooks approx 16 ms to read 250 chars of 10 bits @ 160 kHz
             memset(radioBuffer, 0, sizeof(radioBuffer));
             //Get received Data and calculate length
             int len = ELECHOUSE_cc1101.ReceiveData(radioBuffer);
