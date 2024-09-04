@@ -10,7 +10,7 @@
 
 */
 
-#define VERSION "1.0.17"									// Version of this code
+#define VERSION "1.0.18"									// Version of this code
 #include <FF_WebServer.h>									// Defines associated to FF_WebServer class
 #include <TimeLib.h>										// Date/time definition
 #include "ELECHOUSE_CC1101_SRC_DRV.h"						// Modified version of https://github.com/LSatan/SmartRC-CC1101-Driver-Lib
@@ -37,6 +37,7 @@ float windMs = 0;							// Wind in m/s
 float rainMm = 0;							// Total rain in mm
 float rainMn = 0;							// Rain mm per minute
 float previousRainMm = 0;					// Total rain in mm
+int statusBits = 0;                         // Status bits (after ID)
 int rawTemp = 0;							// Raw temperature as extracted
 int humidity = 0;							// Humidity in percent
 int windRaw = 0;							// Wind speed as extracted
@@ -172,6 +173,7 @@ void decodeMessage(uint8_t const msg[], const uint16_t len) {
 		- yy: incremental value each tx yy = xx + 1
 		- S: (8 bit) checksum
 	*/
+	statusBits = msg[3] & 0x0f;
 	rawTemp = ((msg[4] & 0x0f) << 8) | (msg[5]); // weird format
 	tempF = (rawTemp - 900) * 0.1f;
 	tempC = (tempF - 32) * (5.0 / 9.0);
@@ -199,18 +201,18 @@ void decodeMessage(uint8_t const msg[], const uint16_t len) {
 		lightLux = lightLux * 10;
 	}
 	#ifdef PRINT_DECODED_MESSAGE
-		Serial.printf("temp:%.1f, hum:%d, windSpeed:%.1f, windDir:%d/%s, rain:%.1f, rainMn:%.2f, uv:%d, lux:%lu\n",
-			tempC, humidity, windKmh, windDir, windAbbr, rainMm, rainMn, uvIndex, lightLux);
+		Serial.printf("temp:%.1f, hum:%d, windSpeed:%.1f, windDir:%d/%s, rain:%.1f, rainMn:%.2f, uv:%d, lux:%lu, status:%d\n",
+			tempC, humidity, windKmh, windDir, windAbbr, rainMm, rainMn, uvIndex, lightLux, statusBits);
 	#endif
 
 	loadHexMsg(radioMsg, sizeof(radioMsg));
-	char tempBuffer[280];
+	char tempBuffer[290];
 	snprintf_P(tempBuffer, sizeof(tempBuffer)-1, 
-		PSTR("{\"date\":\"%04d/%02d/%02d %02d:%02d:%02d\",\"temperature\":%.01f,\"humidity\":%d,\"windSpeed\":%.1f,\"windDirection\":%d,\"direction\":\"%s\",\"rain\":%.01f,\"rainMn\":%.02f,\"uv\":%d,\"lux\":%lu,\"frame\":\"%s\",\"rssi\":%d,\"goodCrc\":%lu,\"badCrc\":%lu}"),
+		PSTR("{\"date\":\"%04d/%02d/%02d %02d:%02d:%02d\",\"temperature\":%.01f,\"humidity\":%d,\"windSpeed\":%.1f,\"windDirection\":%d,\"direction\":\"%s\",\"rain\":%.01f,\"rainMn\":%.02f,\"uv\":%d,\"lux\":%lu,\"frame\":\"%s\",\"rssi\":%d,\"goodCrc\":%lu,\"badCrc\":%lu,\"status\":%d}"),
 		year(), month(), day(), hour(), minute(), second(),
 		tempC, humidity,
         windKmh, windDir, windAbbr, rainMm, rainMn,
-        uvIndex, lightLux, hexMsg, rssi, goodCrc, badCrc);
+        uvIndex, lightLux, hexMsg, rssi, goodCrc, badCrc, statusBits);
 	FF_WebServer.mqttPublish("data", tempBuffer, true);
 	// Update Domoticz wind
 	if (domoticzWindIdx !="") {
@@ -305,6 +307,7 @@ DEBUG_COMMAND_CALLBACK(onDebugCommandCallback) {
 		trace_info_P("lightLux=%lu", lightLux);
 		loadHexMsg(radioMsg, sizeof(radioMsg));
 		trace_info_P("radioMsg=%s", hexMsg);
+		trace_info_P("statusBits=%d", statusBits);
 		// -----------
 		return true;
 	// Put here your own debug commands
@@ -369,6 +372,7 @@ REST_COMMAND_CALLBACK(onRestCommandCallback) {
 				"uv|%d|div\n"
 				"lux|%lu|div\n"
 				"crcPct|%.1f|div\n"
+				"stat|%d|div\n"
 				"upd|%02d:%02d:%02d|div\n"
 				// -----------------
 				)
@@ -388,6 +392,7 @@ REST_COMMAND_CALLBACK(onRestCommandCallback) {
 			,uvIndex
 			,lightLux
 			,pctGoodCrc
+            ,statusBits
 			,updHours, updMin, updSec
 			// -----------------
 			);
