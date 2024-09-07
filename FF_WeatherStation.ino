@@ -10,7 +10,7 @@
 
 */
 
-#define VERSION "1.0.18"									// Version of this code
+#define VERSION "1.0.20"									// Version of this code
 #include <FF_WebServer.h>									// Defines associated to FF_WebServer class
 #include <TimeLib.h>										// Date/time definition
 #include "ELECHOUSE_CC1101_SRC_DRV.h"						// Modified version of https://github.com/LSatan/SmartRC-CC1101-Driver-Lib
@@ -308,6 +308,16 @@ DEBUG_COMMAND_CALLBACK(onDebugCommandCallback) {
 		loadHexMsg(radioMsg, sizeof(radioMsg));
 		trace_info_P("radioMsg=%s", hexMsg);
 		trace_info_P("statusBits=%d", statusBits);
+        if (lastRainSaved) {
+            unsigned long updateDelta = (millis() - lastRainSaved) / 1000;
+            unsigned int updHours = updateDelta / 3600;
+            unsigned int secsRemaining = updateDelta % 3600;
+            unsigned int updMin = secsRemaining / 60;
+            unsigned int updSec = secsRemaining % 60;
+            trace_info_P("lastrainSaved=%d:%02d:%02d", updHours, updMin, updSec);
+        } else {
+            trace_info_P("lastRainSaved=Never",0);
+        }
 		// -----------
 		return true;
 	// Put here your own debug commands
@@ -352,8 +362,9 @@ REST_COMMAND_CALLBACK(onRestCommandCallback) {
 
 		tempBuffer[0] = 0;
 		float pctGoodCrc = 0;
+        unsigned long packets = goodCrc + badCrc;
 		if (goodCrc != 0) {
-			pctGoodCrc = goodCrc * 100.0 / (goodCrc + badCrc);
+			pctGoodCrc = goodCrc * 100.0 / packets;
 		}
 
 		snprintf_P(tempBuffer, sizeof(tempBuffer),
@@ -371,6 +382,7 @@ REST_COMMAND_CALLBACK(onRestCommandCallback) {
 				"rainMn|%.2f|div\n"
 				"uv|%d|div\n"
 				"lux|%lu|div\n"
+                "msg|%lu|div\n"
 				"crcPct|%.1f|div\n"
 				"stat|%d|div\n"
 				"upd|%02d:%02d:%02d|div\n"
@@ -391,6 +403,7 @@ REST_COMMAND_CALLBACK(onRestCommandCallback) {
 			,rainMn
 			,uvIndex
 			,lightLux
+            ,packets
 			,pctGoodCrc
             ,statusBits
 			,updHours, updMin, updSec
