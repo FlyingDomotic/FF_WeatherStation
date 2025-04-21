@@ -10,7 +10,7 @@
 
 */
 
-#define VERSION "1.0.20"									// Version of this code
+#define VERSION "1.0.22"									// Version of this code
 #include <FF_WebServer.h>									// Defines associated to FF_WebServer class
 #include <TimeLib.h>										// Date/time definition
 #include "ELECHOUSE_CC1101_SRC_DRV.h"						// Modified version of https://github.com/LSatan/SmartRC-CC1101-Driver-Lib
@@ -174,7 +174,7 @@ void decodeMessage(uint8_t const msg[], const uint16_t len) {
 		- S: (8 bit) checksum
 	*/
 	statusBits = msg[3] & 0x0f;
-	rawTemp = ((msg[4] & 0x0f) << 8) | (msg[5]); // weird format
+    rawTemp = ((msg[4] & 0x0f) << 8) | (msg[5]); // weird format
 	tempF = (rawTemp - 900) * 0.1f;
 	tempC = (tempF - 32) * (5.0 / 9.0);
 	humidity = msg[6];
@@ -206,7 +206,7 @@ void decodeMessage(uint8_t const msg[], const uint16_t len) {
 	#endif
 
 	loadHexMsg(radioMsg, sizeof(radioMsg));
-	char tempBuffer[290];
+	char tempBuffer[350];
 	snprintf_P(tempBuffer, sizeof(tempBuffer)-1, 
 		PSTR("{\"date\":\"%04d/%02d/%02d %02d:%02d:%02d\",\"temperature\":%.01f,\"humidity\":%d,\"windSpeed\":%.1f,\"windDirection\":%d,\"direction\":\"%s\",\"rain\":%.01f,\"rainMn\":%.02f,\"uv\":%d,\"lux\":%lu,\"frame\":\"%s\",\"rssi\":%d,\"goodCrc\":%lu,\"badCrc\":%lu,\"status\":%d}"),
 		year(), month(), day(), hour(), minute(), second(),
@@ -353,9 +353,9 @@ REST_COMMAND_CALLBACK(onRestCommandCallback) {
 		int updMin = 99;
 		int updSec = 99;
         if (lastRainSaved) {
-		unsigned long updateDelta = (millis() - lastRainSaved) / 1000;
+            unsigned long updateDelta = (millis() - lastRainSaved) / 1000;
             updHours = updateDelta / 3600;
-		int secsRemaining = updateDelta % 3600;
+            int secsRemaining = updateDelta % 3600;
             updMin = secsRemaining / 60;
             updSec = secsRemaining % 60;
         }
@@ -550,7 +550,8 @@ void setup() {
 	// Start Little File System
 	LittleFS.begin();
 	// Start FF_WebServer
-	FF_WebServer.begin(&LittleFS, VERSION);
+	FF_WebServer.debugFlag = true;
+    FF_WebServer.begin(&LittleFS, VERSION);
 	Serial.setDebugOutput(false);
 	// Register user's trace callback, if needed
 	#ifdef FF_DISABLE_DEFAULT_TRACE
@@ -605,7 +606,7 @@ void setup() {
 	ELECHOUSE_cc1101.setPacketLength(0);	// Indicates the packet length
 	ELECHOUSE_cc1101.setCrc(0);				// 0 = CRC disabled for TX and RX.
 	ELECHOUSE_cc1101.setRxBW(160);			// Set the Receive Bandwidth in kHz
-	ELECHOUSE_cc1101.setDeviation(35);	// Set frequency deviation
+	ELECHOUSE_cc1101.setDeviation(35);      // Set frequency deviation
     
 	uint8_t foccfg = ELECHOUSE_cc1101.SpiReadReg(CC1101_FOCCFG);	// Read current FOCCFG
 	ELECHOUSE_cc1101.SpiWriteReg(CC1101_FOCCFG, foccfg | (1 << 5));	// Force bit 5 (FOC_BS_CS_GATE)
@@ -613,7 +614,7 @@ void setup() {
 	ELECHOUSE_cc1101.SpiWriteReg(CC1101_AGCCTRL0, 0x91);
 	ELECHOUSE_cc1101.SpiWriteReg(CC1101_AGCCTRL1, 0x40);
 	ELECHOUSE_cc1101.SpiWriteReg(CC1101_AGCCTRL2, 0x43);
-
+    
     windAbbr = getWindAbbreviation(0);		// To avoid crash before first message received
 }
 
@@ -643,9 +644,9 @@ void loop() {
                 #endif
                 // Check preamble
                 if (radioBuffer[0] == 0xaa) {
-                // Copy message after pattern
-                memcpy(radioMsg, &radioBuffer[0], sizeof(radioMsg)); 
-                decodeMessage(radioMsg, sizeof(radioMsg));
+                    // Copy message after pattern
+                    memcpy(radioMsg, &radioBuffer[0], sizeof(radioMsg)); 
+                    decodeMessage(radioMsg, sizeof(radioMsg));
                 #ifdef PRINT_REJECT_REASON
                 } else {
                     Serial.printf("Frame too noisy or too short\n");
